@@ -1,0 +1,59 @@
+name: Build Android APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Locate project
+        id: project
+        shell: bash
+        run: |
+          if [ -f android/settings.gradle ]; then
+            echo "root=." >> "$GITHUB_OUTPUT"
+          elif [ -f vault-arcade/android/settings.gradle ]; then
+            echo "root=vault-arcade" >> "$GITHUB_OUTPUT"
+          else
+            echo "Android project missing. Upload the complete vault-arcade project."
+            exit 1
+          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check game code and payout rules
+        working-directory: ${{ steps.project.outputs.root }}
+        run: |
+          node --check dist/app.js
+          node --check dist/animations.js
+          node --test tests/*.test.cjs
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Build installable debug APK
+        working-directory: ${{ steps.project.outputs.root }}/android
+        run: gradle --no-daemon assembleDebug
+      - name: Verify website is bundled
+        working-directory: ${{ steps.project.outputs.root }}/android
+        run: |
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep 'assets/index.html'
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep 'assets/game-math.js'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Vault-Arcade-APK
+          path: ${{ steps.project.outputs.root }}/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
